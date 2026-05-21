@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <signal.h>
+#include <ifaddrs.h>
 
 #define MAX_HIST 100
 
@@ -44,16 +45,16 @@ const char *PAGE =
 "</style>"
 "</head>"
 "<body>"
-"<header><b>quint</b><button onclick=\"t()\">&#9680;</button></header>"
+"<header><b>quint</b><button onclick=\"dm()\">&#9680;</button></header>"
 "<div id=\"m\"></div>"
 "<div id=\"f\">"
-"<input id=\"u\" placeholder=\"name\" style=\"width:100px\">"
-"<input id=\"t\" placeholder=\"message\" onkeydown=\"if(event.key==='Enter')s()\">"
+"<input id=\"n\" placeholder=\"name\" style=\"width:100px\">"
+"<input id=\"x\" placeholder=\"message\" onkeydown=\"if(event.key==='Enter')s()\">"
 "<button onclick=\"s()\">send</button>"
 "</div>"
 "<script>"
 "if(localStorage.m==='1')document.body.classList.add('dark');"
-"function t(){document.body.classList.toggle('dark');localStorage.m=document.body.classList.contains('dark')?'1':'0';}"
+"function dm(){document.body.classList.toggle('dark');localStorage.m=document.body.classList.contains('dark')?'1':'0';}"
 "let last=0;"
 "async function l(){"
 "const r=await fetch('/m?since='+last);"
@@ -61,33 +62,34 @@ const char *PAGE =
 "j.forEach(x=>{last=x.i;const d=document.createElement('div');d.className='msg';d.innerHTML='<b>'+x.u+'</b> '+x.t;m.appendChild(d);m.scrollTop=m.scrollHeight;});"
 "}"
 "async function s(){"
-"if(!u.value||!t.value)return;"
-"await fetch('/s',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'u='+encodeURIComponent(u.value)+'&t='+encodeURIComponent(t.value)});"
-"t.value='';l();"
+"if(!n.value||!x.value)return;"
+"await fetch('/s',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'u='+encodeURIComponent(n.value)+'&t='+encodeURIComponent(x.value)});"
+"x.value='';l();"
 "}"
 "setInterval(l,1000);l();"
 "</script>"
 "</body>"
 "</html>";
 
-void get_ip(char *buf, size_t len) {
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) { strncpy(buf, "0.0.0.0", len); return; }
-    struct sockaddr_in s;
-    memset(&s, 0, sizeof(s));
-    s.sin_family = AF_INET;
-    s.sin_addr.s_addr = inet_addr("8.8.8.8");
-    s.sin_port = htons(53);
-    if (connect(sock, (struct sockaddr*)&s, sizeof(s)) < 0) {
-        close(sock); strncpy(buf, "0.0.0.0", len); return;
+void print_ips(int port) {
+    struct ifaddrs *ifaddr, *ifa;
+    if (getifaddrs(&ifaddr) == -1) {
+        printf("127.0.0.1:%d\n", port);
+        return;
     }
-    struct sockaddr_in n;
-    socklen_t nl = sizeof(n);
-    if (getsockname(sock, (struct sockaddr*)&n, &nl) < 0) {
-        close(sock); strncpy(buf, "0.0.0.0", len); return;
+    int found = 0;
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == NULL) continue;
+        if (ifa->ifa_addr->sa_family == AF_INET) {
+            struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
+            char ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &sin->sin_addr, ip, sizeof(ip));
+            printf("%s:%d\n", ip, port);
+            found = 1;
+        }
     }
-    inet_ntop(AF_INET, &n.sin_addr, buf, len);
-    close(sock);
+    if (!found) printf("127.0.0.1:%d\n", port);
+    freeifaddrs(ifaddr);
 }
 
 void url_decode(const char *src, char *dst, size_t n) {
@@ -122,8 +124,8 @@ void handle_client(int c) {
     sscanf(buf, "%7s %255s", method, path);
 
     if (strcmp(method, "GET") == 0 && strcmp(path, "/") == 0) {
-        char h[256];
         int plen = strlen(PAGE);
+        char h[256];
         snprintf(h, sizeof(h), "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", plen);
         send(c, h, strlen(h), 0);
         send(c, PAGE, plen, 0);
@@ -238,9 +240,7 @@ int main(int argc, char **argv) {
     if (bind(s, (struct sockaddr*)&a, sizeof(a)) < 0) { perror("bind"); return 1; }
     if (listen(s, 64) < 0) { perror("listen"); return 1; }
 
-    char ip[32];
-    get_ip(ip, sizeof(ip));
-    printf("%s:%d\n", ip, port);
+    print_ips(port);
     fflush(stdout);
 
     while (1) {
